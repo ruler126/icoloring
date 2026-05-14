@@ -25,6 +25,18 @@ type StorageProvider = {
   saveGeneratedFile(fileName: string, buffer: Buffer): Promise<string>;
 };
 
+class CosRequestError extends Error {
+  constructor(
+    public readonly method: string,
+    public readonly key: string,
+    public readonly status: number,
+    detail: string,
+  ) {
+    super(`COS ${method} ${key} failed: ${status} ${detail.slice(0, 120)}`);
+    this.name = "CosRequestError";
+  }
+}
+
 const historyLimit = 18;
 const storageDir = path.join(process.cwd(), "storage");
 const generatedDir = path.join(storageDir, "generated");
@@ -185,9 +197,7 @@ async function cosRequest(method: "GET" | "PUT", key: string, body?: Buffer) {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `COS ${method} ${key} 失败：${response.status} ${detail.slice(0, 120)}`,
-    );
+    throw new CosRequestError(method, key, response.status, detail);
   }
 
   return response;
@@ -245,7 +255,7 @@ const cosProvider: StorageProvider = {
       const response = await cosRequest("GET", toCosKey(cosHistoryKey));
       return parseHistory(await response.text());
     } catch (error) {
-      if (error instanceof Error && error.message.includes(" 404 ")) {
+      if (error instanceof CosRequestError && error.status === 404) {
         return [];
       }
 
