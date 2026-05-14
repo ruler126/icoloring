@@ -1,9 +1,12 @@
 type SharpModule = typeof import("sharp");
 
-let sharpPromise: Promise<SharpModule["default"]> | null = null;
+let sharpPromise: Promise<SharpModule> | null = null;
 
-export async function loadSharp() {
-  sharpPromise ??= import("sharp").then((module) => module.default);
+export async function loadSharp(): Promise<SharpModule> {
+  sharpPromise ??= import("sharp").then((module) => {
+    const loaded = module as unknown as { default?: SharpModule };
+    return loaded.default ?? (module as unknown as SharpModule);
+  });
 
   try {
     return await sharpPromise;
