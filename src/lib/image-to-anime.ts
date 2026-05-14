@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import { loadSharp } from "@/lib/sharp-loader";
 
 type AnimeStyle = "cel" | "shoujo" | "shonen" | "chibi" | "fantasy" | "neon";
 
@@ -142,6 +142,7 @@ export async function convertImageToAnime(
   style: string,
   outputSize = 1024,
 ): Promise<Buffer> {
+  const sharp = await loadSharp();
   const selectedStyle: AnimeStyle =
     style === "shoujo" ||
     style === "shonen" ||

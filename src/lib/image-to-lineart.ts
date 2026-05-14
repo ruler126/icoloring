@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import { loadSharp } from "@/lib/sharp-loader";
 
 type ImageStyle = "clean" | "cartoon" | "sketch";
 
@@ -151,6 +151,7 @@ export async function convertImageToLineart(
   style: string,
   outputSize = 1536,
 ): Promise<Buffer> {
+  const sharp = await loadSharp();
   const selectedStyle: ImageStyle =
     style === "cartoon" || style === "sketch" ? style : "clean";
   const config = styleConfig(selectedStyle);

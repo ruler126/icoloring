@@ -1,5 +1,3 @@
-import sharp from "sharp";
-
 import {
   buildColoringPrompt,
   defaultCustomProviderBaseUrl,
@@ -13,6 +11,7 @@ import {
   type ImageProviderMode,
   type TextProviderMode,
 } from "@/lib/coloring";
+import { loadSharp } from "@/lib/sharp-loader";
 
 const upstreamTimeoutMs = 45_000;
 const nativeFalPollTimeoutMs = 120_000;
@@ -93,11 +92,20 @@ function getFallbackSvg(prompt: string, style: string) {
 }
 
 async function generateFallbackPng(prompt: string, style: string) {
+  const sharp = await loadSharp();
   const svg = getFallbackSvg(prompt, style);
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 async function resizeOutputBuffer(buffer: Buffer, targetSize: number) {
+  let sharp: Awaited<ReturnType<typeof loadSharp>>;
+
+  try {
+    sharp = await loadSharp();
+  } catch {
+    return buffer;
+  }
+
   const metadata = await sharp(buffer).metadata();
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;

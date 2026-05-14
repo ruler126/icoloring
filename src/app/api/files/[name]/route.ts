@@ -1,7 +1,6 @@
 import { basename, extname } from "node:path";
 
-import sharp from "sharp";
-
+import { loadSharp } from "@/lib/sharp-loader";
 import { readGeneratedFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -38,17 +37,7 @@ export async function GET(
     const requestedSize = parseDownloadSize(url.searchParams.get("size"));
     const originalData = await readGeneratedFile(safeName);
     const data = requestedSize
-      ? await sharp(originalData)
-          .resize({
-            width: requestedSize,
-            height: requestedSize,
-            fit: "contain",
-            background: "white",
-            withoutEnlargement: false,
-            kernel: sharp.kernel.lanczos3,
-          })
-          .png()
-          .toBuffer()
+      ? await resizeForDownload(originalData, requestedSize)
       : originalData;
     const headers = new Headers({
       "Content-Type": requestedSize ? "image/png" : getMimeType(safeName),
@@ -63,5 +52,24 @@ export async function GET(
     return new Response(body, { headers });
   } catch {
     return Response.json({ error: "文件不存在。" }, { status: 404 });
+  }
+}
+
+async function resizeForDownload(originalData: Buffer, requestedSize: 1024 | 2048) {
+  try {
+    const sharp = await loadSharp();
+    return await sharp(originalData)
+          .resize({
+            width: requestedSize,
+            height: requestedSize,
+            fit: "contain",
+            background: "white",
+            withoutEnlargement: false,
+            kernel: sharp.kernel.lanczos3,
+          })
+          .png()
+          .toBuffer();
+  } catch {
+    return originalData;
   }
 }
