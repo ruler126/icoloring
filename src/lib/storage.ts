@@ -47,12 +47,12 @@ function toCosKey(fileName: string) {
 }
 
 function getCosConfig() {
-  const secretId = process.env.COS_SECRET_ID;
-  const secretKey = process.env.COS_SECRET_KEY;
-  const bucket = process.env.COS_BUCKET;
-  const region = process.env.COS_REGION;
+  const secretId = process.env.COS_SECRET_ID?.trim();
+  const secretKey = process.env.COS_SECRET_KEY?.trim();
+  const bucket = process.env.COS_BUCKET?.trim();
+  const region = process.env.COS_REGION?.trim();
   const endpoint =
-    process.env.COS_ENDPOINT ||
+    process.env.COS_ENDPOINT?.trim() ||
     (bucket && region ? `https://${bucket}.cos.${region}.myqcloud.com` : "");
 
   if (!secretId || !secretKey || !bucket || !region || !endpoint) {
@@ -76,23 +76,44 @@ function sha1(value: string) {
   return createHash("sha1").update(value).digest("hex");
 }
 
+function encodeCosComponent(value: string) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
 function encodeCosPath(key: string) {
   return `/${key
     .split("/")
-    .map((part) => encodeURIComponent(part))
+    .map((part) => encodeCosComponent(part))
     .join("/")}`;
 }
 
-function createCosAuthorization(method: string, key: string, host: string) {
+function createCosAuthorization(
+  method: string,
+  key: string,
+  headers: Record<string, string>,
+) {
   const { secretId, secretKey } = getCosConfig();
   const now = Math.floor(Date.now() / 1000);
   const signTime = `${now};${now + 600}`;
   const httpMethod = method.toLowerCase();
   const httpUri = encodeCosPath(key);
   const httpParameters = "";
-  const httpHeaders = `host=${host.toLowerCase()}\n`;
-  const signedHeaders = "host";
+  const canonicalHeaders = Object.entries(headers)
+    .map(([name, value]) => [
+      name.trim().toLowerCase(),
+      value.trim().replace(/\s+/g, " "),
+    ])
+    .sort(([left], [right]) => left.localeCompare(right));
+  const signedHeaders = canonicalHeaders.map(([name]) => name).join(";");
   const signedParameters = "";
+  const httpHeaders = canonicalHeaders
+    .map(
+      ([name, value]) =>
+        `${encodeCosComponent(name)}=${encodeCosComponent(value)}`,
+    )
+    .join("&");
   const httpString = `${httpMethod}\n${httpUri}\n${httpParameters}\n${httpHeaders}\n`;
   const stringToSign = `sha1\n${signTime}\n${sha1(httpString)}\n`;
   const signKey = hmacSha1(secretKey, signTime);
@@ -144,15 +165,17 @@ async function parseHistory(raw: string) {
 async function cosRequest(method: "GET" | "PUT", key: string, body?: Buffer) {
   const { endpoint } = getCosConfig();
   const url = new URL(encodeCosPath(key), endpoint);
-  const host = url.host;
-  const headers = new Headers({
-    Authorization: createCosAuthorization(method, key, host),
-  });
+  const signedHeaders: Record<string, string> = {
+    host: url.host.toLowerCase(),
+  };
 
   if (body) {
-    headers.set("Content-Length", String(body.byteLength));
-    headers.set("Content-Type", "application/octet-stream");
+    signedHeaders["content-length"] = String(body.byteLength);
+    signedHeaders["content-type"] = "application/octet-stream";
   }
+
+  const headers = new Headers(signedHeaders);
+  headers.set("Authorization", createCosAuthorization(method, key, signedHeaders));
 
   const response = await fetch(url, {
     body: body ? new Uint8Array(body) : undefined,
