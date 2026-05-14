@@ -1,0 +1,12 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": ".next",
+  "nodeVersion": "20.18.0",
+  "cloudFunctions": {
+    "nodejs": {
+      "externalNodeModules": ["sharp"],
+      "maxDuration": 120
+    }
+  }
+}
