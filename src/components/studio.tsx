@@ -15,6 +15,7 @@ import {
   ecommerceDirectionPresets,
   ecommercePromptTemplates,
   type EcommerceDirection,
+  getOutputSizeByQuality,
   getStyleLabel,
   historyLimit,
   type ImageProviderMode,
@@ -451,6 +452,401 @@ function useLocalHistory() {
   );
 }
 
+type LocalUploadMode = "image" | "anime";
+type LocalLineartStyle = "clean" | "cartoon" | "sketch";
+type LocalAnimeStyle = "cel" | "shoujo" | "shonen" | "chibi" | "fantasy" | "neon";
+
+function getCanvasContext(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext("2d", {
+    willReadFrequently: true,
+  });
+
+  if (!context) {
+    throw new Error("当前浏览器无法处理图片，请换用现代浏览器后重试。");
+  }
+
+  return context;
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+
+      reject(new Error("图片生成失败，请稍后重试。"));
+    }, "image/png");
+  });
+}
+
+async function loadImageElement(file: File) {
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.decoding = "async";
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("图片读取失败，请换一张图片重试。"));
+      image.src = url;
+    });
+
+    return { image, url };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+
+async function drawUploadedImage(file: File, outputSize: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+
+  const context = getCanvasContext(canvas);
+  const { image, url } = await loadImageElement(file);
+
+  try {
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+
+    if (!sourceWidth || !sourceHeight) {
+      throw new Error("图片尺寸无效，请换一张图片重试。");
+    }
+
+    const scale = Math.min(outputSize / sourceWidth, outputSize / sourceHeight);
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const x = Math.round((outputSize - width) / 2);
+    const y = Math.round((outputSize - height) / 2);
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, outputSize, outputSize);
+    context.drawImage(image, x, y, width, height);
+
+    return { canvas, context };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function getLineartConfig(style: string) {
+  if (style === "sketch") {
+    return { edgeThreshold: 96, minNeighbors: 1, expandPasses: 0 };
+  }
+
+  if (style === "cartoon") {
+    return { edgeThreshold: 114, minNeighbors: 2, expandPasses: 2 };
+  }
+
+  return { edgeThreshold: 104, minNeighbors: 2, expandPasses: 1 };
+}
+
+function getPixelIndex(x: number, y: number, width: number) {
+  return y * width + x;
+}
+
+function countBlackNeighbors(
+  pixels: Uint8Array,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  let count = 0;
+
+  for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      if (offsetX === 0 && offsetY === 0) {
+        continue;
+      }
+
+      const nextX = x + offsetX;
+      const nextY = y + offsetY;
+
+      if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) {
+        continue;
+      }
+
+      if (pixels[getPixelIndex(nextX, nextY, width)] === 0) {
+        count += 1;
+      }
+    }
+  }
+
+  return count;
+}
+
+function buildGrayscale(data: Uint8ClampedArray, width: number, height: number) {
+  const gray = new Uint8Array(width * height);
+
+  for (let index = 0; index < gray.length; index += 1) {
+    const sourceIndex = index * 4;
+    gray[index] = Math.round(
+      data[sourceIndex] * 0.299 +
+        data[sourceIndex + 1] * 0.587 +
+        data[sourceIndex + 2] * 0.114,
+    );
+  }
+
+  return gray;
+}
+
+function applyLocalLineart(imageData: ImageData, style: LocalLineartStyle) {
+  const { width, height, data } = imageData;
+  const source = buildGrayscale(data, width, height);
+  const config = getLineartConfig(style);
+  const magnitude = new Float32Array(width * height);
+  const binary = new Uint8Array(width * height);
+  binary.fill(255);
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const topLeft = source[getPixelIndex(x - 1, y - 1, width)];
+      const top = source[getPixelIndex(x, y - 1, width)];
+      const topRight = source[getPixelIndex(x + 1, y - 1, width)];
+      const left = source[getPixelIndex(x - 1, y, width)];
+      const right = source[getPixelIndex(x + 1, y, width)];
+      const bottomLeft = source[getPixelIndex(x - 1, y + 1, width)];
+      const bottom = source[getPixelIndex(x, y + 1, width)];
+      const bottomRight = source[getPixelIndex(x + 1, y + 1, width)];
+      const gradientX =
+        -topLeft + topRight - 2 * left + 2 * right - bottomLeft + bottomRight;
+      const gradientY =
+        topLeft + 2 * top + topRight - bottomLeft - 2 * bottom - bottomRight;
+      const strength = Math.sqrt(gradientX * gradientX + gradientY * gradientY);
+      const pixelIndex = getPixelIndex(x, y, width);
+
+      magnitude[pixelIndex] = strength;
+      binary[pixelIndex] = strength >= config.edgeThreshold ? 0 : 255;
+    }
+  }
+
+  const cleaned = new Uint8Array(binary);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixelIndex = getPixelIndex(x, y, width);
+
+      if (
+        binary[pixelIndex] === 0 &&
+        countBlackNeighbors(binary, x, y, width, height) < config.minNeighbors
+      ) {
+        cleaned[pixelIndex] = 255;
+      }
+    }
+  }
+
+  let expanded = cleaned;
+  for (let pass = 0; pass < config.expandPasses; pass += 1) {
+    const next = new Uint8Array(expanded);
+
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const pixelIndex = getPixelIndex(x, y, width);
+
+        if (
+          expanded[pixelIndex] !== 0 &&
+          countBlackNeighbors(expanded, x, y, width, height) >= 3 &&
+          magnitude[pixelIndex] >= config.edgeThreshold * 0.58
+        ) {
+          next[pixelIndex] = 0;
+        }
+      }
+    }
+
+    expanded = next;
+  }
+
+  for (let index = 0; index < expanded.length; index += 1) {
+    const targetIndex = index * 4;
+    const value = expanded[index];
+    data[targetIndex] = value;
+    data[targetIndex + 1] = value;
+    data[targetIndex + 2] = value;
+    data[targetIndex + 3] = 255;
+  }
+
+  return imageData;
+}
+
+function clampByte(value: number) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function quantizeChannel(value: number, levels: number) {
+  const step = 255 / Math.max(2, levels - 1);
+  return clampByte(Math.round(value / step) * step);
+}
+
+function getAnimeConfig(style: string) {
+  switch (style) {
+    case "shoujo":
+      return {
+        levels: 7,
+        saturation: 1.24,
+        brightness: 1.08,
+        contrast: 1.04,
+        edgeThreshold: 66,
+        edgeOpacity: 0.34,
+        tint: [255, 232, 244] as const,
+      };
+    case "shonen":
+      return {
+        levels: 6,
+        saturation: 1.3,
+        brightness: 0.98,
+        contrast: 1.15,
+        edgeThreshold: 60,
+        edgeOpacity: 0.46,
+        tint: [255, 238, 220] as const,
+      };
+    case "chibi":
+      return {
+        levels: 8,
+        saturation: 1.18,
+        brightness: 1.06,
+        contrast: 1.02,
+        edgeThreshold: 72,
+        edgeOpacity: 0.28,
+        tint: [255, 244, 232] as const,
+      };
+    case "fantasy":
+      return {
+        levels: 9,
+        saturation: 1.22,
+        brightness: 1.05,
+        contrast: 1.06,
+        edgeThreshold: 68,
+        edgeOpacity: 0.25,
+        tint: [225, 240, 255] as const,
+      };
+    case "neon":
+      return {
+        levels: 6,
+        saturation: 1.42,
+        brightness: 0.94,
+        contrast: 1.18,
+        edgeThreshold: 62,
+        edgeOpacity: 0.38,
+        tint: [215, 235, 255] as const,
+      };
+    default:
+      return {
+        levels: 7,
+        saturation: 1.18,
+        brightness: 1.02,
+        contrast: 1.08,
+        edgeThreshold: 64,
+        edgeOpacity: 0.34,
+        tint: [255, 245, 230] as const,
+      };
+  }
+}
+
+function applyLocalAnime(imageData: ImageData, style: LocalAnimeStyle) {
+  const { width, height, data } = imageData;
+  const gray = buildGrayscale(data, width, height);
+  const config = getAnimeConfig(style);
+
+  for (let index = 0; index < data.length; index += 4) {
+    const luminance =
+      data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+    const red = (data[index] - luminance) * config.saturation + luminance;
+    const green = (data[index + 1] - luminance) * config.saturation + luminance;
+    const blue = (data[index + 2] - luminance) * config.saturation + luminance;
+
+    data[index] = clampByte(
+      quantizeChannel((red - 128) * config.contrast + 128, config.levels) *
+        0.86 *
+        config.brightness +
+        config.tint[0] * 0.14,
+    );
+    data[index + 1] = clampByte(
+      quantizeChannel((green - 128) * config.contrast + 128, config.levels) *
+        0.86 *
+        config.brightness +
+        config.tint[1] * 0.14,
+    );
+    data[index + 2] = clampByte(
+      quantizeChannel((blue - 128) * config.contrast + 128, config.levels) *
+        0.86 *
+        config.brightness +
+        config.tint[2] * 0.14,
+    );
+    data[index + 3] = 255;
+  }
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const topLeft = gray[getPixelIndex(x - 1, y - 1, width)];
+      const top = gray[getPixelIndex(x, y - 1, width)];
+      const topRight = gray[getPixelIndex(x + 1, y - 1, width)];
+      const left = gray[getPixelIndex(x - 1, y, width)];
+      const right = gray[getPixelIndex(x + 1, y, width)];
+      const bottomLeft = gray[getPixelIndex(x - 1, y + 1, width)];
+      const bottom = gray[getPixelIndex(x, y + 1, width)];
+      const bottomRight = gray[getPixelIndex(x + 1, y + 1, width)];
+      const gradientX =
+        -topLeft + topRight - 2 * left + 2 * right - bottomLeft + bottomRight;
+      const gradientY =
+        topLeft + 2 * top + topRight - bottomLeft - 2 * bottom - bottomRight;
+      const strength = Math.sqrt(gradientX * gradientX + gradientY * gradientY);
+
+      if (strength < config.edgeThreshold) {
+        continue;
+      }
+
+      const alpha = Math.min(
+        0.9,
+        Math.min(1, (strength - config.edgeThreshold) / 160 + config.edgeOpacity),
+      );
+      const targetIndex = getPixelIndex(x, y, width) * 4;
+
+      data[targetIndex] = clampByte(data[targetIndex] * (1 - alpha) + 24 * alpha);
+      data[targetIndex + 1] = clampByte(
+        data[targetIndex + 1] * (1 - alpha) + 22 * alpha,
+      );
+      data[targetIndex + 2] = clampByte(
+        data[targetIndex + 2] * (1 - alpha) + 28 * alpha,
+      );
+    }
+  }
+
+  return imageData;
+}
+
+async function processUploadInBrowser(
+  file: File,
+  mode: LocalUploadMode,
+  style: string,
+  outputSize: number,
+) {
+  const { canvas, context } = await drawUploadedImage(file, outputSize);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const selectedLineartStyle: LocalLineartStyle =
+    style === "cartoon" || style === "sketch" ? style : "clean";
+  const selectedAnimeStyle: LocalAnimeStyle =
+    style === "shoujo" ||
+    style === "shonen" ||
+    style === "chibi" ||
+    style === "fantasy" ||
+    style === "neon"
+      ? style
+      : "cel";
+
+  context.putImageData(
+    mode === "anime"
+      ? applyLocalAnime(imageData, selectedAnimeStyle)
+      : applyLocalLineart(imageData, selectedLineartStyle),
+    0,
+    0,
+  );
+
+  return canvasToPngBlob(canvas);
+}
+
 export function Studio() {
   const providerSettings = useProviderSettings();
   const history = useLocalHistory();
@@ -569,15 +965,66 @@ export function Studio() {
         }
 
         setResult(null);
+        const uploadMode: LocalUploadMode = mode === "anime" ? "anime" : "image";
+        const uploadStyle = uploadMode === "anime" ? animeStyle : imageStyle;
+        const useCustomProvider = imageProviderMode === "custom";
+
+        if (!useCustomProvider) {
+          const outputSize = getOutputSizeByQuality(providerSettings.outputQuality);
+          const processedBlob = await processUploadInBrowser(
+            file,
+            uploadMode,
+            uploadStyle,
+            outputSize,
+          );
+          const saveFormData = new FormData();
+          saveFormData.set("file", processedBlob, "generated.png");
+          saveFormData.set("mode", uploadMode);
+          saveFormData.set("prompt", file.name || "已上传图片");
+          saveFormData.set("style", uploadStyle);
+          saveFormData.set("width", String(outputSize));
+          saveFormData.set("height", String(outputSize));
+
+          const { response, data } = await fetchJsonWithTimeout<
+            GenerationResult | ApiErrorResponse
+          >(
+            "/api/client-generated",
+            {
+              method: "POST",
+              body: saveFormData,
+            },
+            imageGenerationTimeoutMs,
+          );
+
+          if (!response.ok || "error" in data) {
+            throw new Error(
+              getTextFromUnknownPayload(data) ||
+                (uploadMode === "anime" ? "动漫化失败" : "转换失败"),
+            );
+          }
+
+          setResult(data);
+          pushHistoryItem({
+            id: data.id ?? createClientId(),
+            mode: uploadMode,
+            prompt: data.prompt,
+            style: data.style,
+            createdAt: new Date().toISOString(),
+            imageUrl: data.imageUrl,
+            downloadUrl: data.downloadUrl,
+          });
+          return;
+        }
+
         const formData = new FormData();
         formData.set("file", file);
-        formData.set("style", mode === "anime" ? animeStyle : imageStyle);
+        formData.set("style", uploadStyle);
         formData.set("provider", JSON.stringify(providerSettings));
 
         const { response, data } = await fetchJsonWithTimeout<
           GenerationResult | ApiErrorResponse
         >(
-          mode === "anime" ? "/api/image-to-anime" : "/api/image-to-coloring",
+          uploadMode === "anime" ? "/api/image-to-anime" : "/api/image-to-coloring",
           {
             method: "POST",
             body: formData,
@@ -588,14 +1035,14 @@ export function Studio() {
         if (!response.ok || "error" in data) {
           throw new Error(
             getTextFromUnknownPayload(data) ||
-              (mode === "anime" ? "动漫化失败" : "转换失败"),
+              (uploadMode === "anime" ? "动漫化失败" : "转换失败"),
           );
         }
 
         setResult(data);
         pushHistoryItem({
           id: data.id ?? createClientId(),
-          mode,
+          mode: uploadMode,
           prompt: data.prompt,
           style: data.style,
           createdAt: new Date().toISOString(),

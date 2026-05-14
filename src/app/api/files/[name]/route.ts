@@ -1,6 +1,5 @@
 import { basename, extname } from "node:path";
 
-import { loadSharp } from "@/lib/sharp-loader";
 import { readGeneratedFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -14,18 +13,6 @@ function getMimeType(fileName: string) {
   return "image/png";
 }
 
-function parseDownloadSize(value: string | null) {
-  if (value === "2048") {
-    return 2048;
-  }
-
-  if (value === "1024") {
-    return 1024;
-  }
-
-  return null;
-}
-
 export async function GET(
   request: Request,
   context: RouteContext<"/api/files/[name]">,
@@ -34,13 +21,10 @@ export async function GET(
     const { name } = await context.params;
     const safeName = basename(name);
     const url = new URL(request.url);
-    const requestedSize = parseDownloadSize(url.searchParams.get("size"));
     const originalData = await readGeneratedFile(safeName);
-    const data = requestedSize
-      ? await resizeForDownload(originalData, requestedSize)
-      : originalData;
+    const data = originalData;
     const headers = new Headers({
-      "Content-Type": requestedSize ? "image/png" : getMimeType(safeName),
+      "Content-Type": getMimeType(safeName),
       "Cache-Control": "no-store",
     });
 
@@ -52,24 +36,5 @@ export async function GET(
     return new Response(body, { headers });
   } catch {
     return Response.json({ error: "文件不存在。" }, { status: 404 });
-  }
-}
-
-async function resizeForDownload(originalData: Buffer, requestedSize: 1024 | 2048) {
-  try {
-    const sharp = await loadSharp();
-    return await sharp(originalData)
-          .resize({
-            width: requestedSize,
-            height: requestedSize,
-            fit: "contain",
-            background: "white",
-            withoutEnlargement: false,
-            kernel: sharp.kernel.lanczos3,
-          })
-          .png()
-          .toBuffer();
-  } catch {
-    return originalData;
   }
 }

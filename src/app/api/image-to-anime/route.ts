@@ -5,7 +5,6 @@ import {
   getOutputSizeByQuality,
   type CustomAiSettings,
 } from "@/lib/coloring";
-import { convertImageToAnime } from "@/lib/image-to-anime";
 import { addHistoryItemBestEffort, saveGeneratedFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -41,9 +40,11 @@ export async function POST(request: Request) {
         if (!providerSettings?.allowFallback) {
           throw error;
         }
+        const { convertImageToAnime } = await import("@/lib/image-to-anime");
         image = await convertImageToAnime(buffer, style, outputSize);
       }
     } else {
+      const { convertImageToAnime } = await import("@/lib/image-to-anime");
       image = await convertImageToAnime(buffer, style, outputSize);
     }
 

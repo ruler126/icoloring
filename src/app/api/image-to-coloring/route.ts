@@ -5,7 +5,6 @@ import {
   getOutputSizeByQuality,
   type CustomAiSettings,
 } from "@/lib/coloring";
-import { convertImageToLineart } from "@/lib/image-to-lineart";
 import { addHistoryItemBestEffort, saveGeneratedFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -41,9 +40,11 @@ export async function POST(request: Request) {
         if (!providerSettings?.allowFallback) {
           throw error;
         }
+        const { convertImageToLineart } = await import("@/lib/image-to-lineart");
         image = await convertImageToLineart(buffer, style, outputSize);
       }
     } else {
+      const { convertImageToLineart } = await import("@/lib/image-to-lineart");
       image = await convertImageToLineart(buffer, style, outputSize);
     }
     const id = randomUUID();
