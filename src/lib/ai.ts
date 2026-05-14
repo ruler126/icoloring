@@ -13,10 +13,10 @@ import {
 } from "@/lib/coloring";
 import { loadSharp } from "@/lib/sharp-loader";
 
-const upstreamTimeoutMs = 45_000;
-const nativeFalPollTimeoutMs = 120_000;
+const upstreamTimeoutMs = 200_000;
+const nativeFalPollTimeoutMs = 200_000;
 const nativeFalPollIntervalMs = 2_500;
-const apimartPollTimeoutMs = 180_000;
+const apimartPollTimeoutMs = 200_000;
 const apimartInitialPollDelayMs = 10_000;
 const apimartPollIntervalMs = 4_000;
 
@@ -853,7 +853,7 @@ async function downloadImageBuffer(url: string) {
       },
       cache: "no-store",
     },
-    30_000,
+    upstreamTimeoutMs,
   );
 
   if (!imageResponse.ok) {
@@ -894,7 +894,7 @@ async function pollApimartTaskResult(options: {
         },
         cache: "no-store",
       },
-      30_000,
+      upstreamTimeoutMs,
     );
     const payload = await readResponsePayload(response);
     lastPayload = payload;
@@ -976,7 +976,7 @@ async function requestNativeFalTask(
       body: JSON.stringify(body),
       cache: "no-store",
     },
-    30_000,
+    upstreamTimeoutMs,
   );
   const payload = await readResponsePayload(response);
 
@@ -1003,7 +1003,7 @@ async function pollNativeFalResult(
         },
         cache: "no-store",
       },
-      30_000,
+      upstreamTimeoutMs,
     );
     const payload = await readResponsePayload(response);
     lastPayload = payload;

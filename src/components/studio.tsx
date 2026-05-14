@@ -77,8 +77,8 @@ const providerStorageKey = "icoloring.custom-ai-settings";
 const historyStorageKey = "icoloring.local-history";
 const providerStoreEvent = "icoloring:provider-settings";
 const historyStoreEvent = "icoloring:history";
-const textGenerationTimeoutMs = 120_000;
-const imageGenerationTimeoutMs = 210_000;
+const textGenerationTimeoutMs = 220_000;
+const imageGenerationTimeoutMs = 220_000;
 
 const defaultProviderSettings: CustomAiSettings = {
   providerMode: "free",
@@ -1126,11 +1126,11 @@ export function Studio() {
                     ? isTextImageMode
                       ? "普通文生图接口"
                       : "普通接口"
-                    : "自定义 AI · OpenAI 兼容平台"
+                    : "自定义 AI · ai模型会中断它认为不健康的内容"
                 }`
               : ` · 来源：${
                   imageProviderMode === "custom"
-                    ? `${uploadModeAiLabel} · OpenAI 兼容平台`
+                    ? `${uploadModeAiLabel} · ai模型会中断它认为不健康的内容`
                     : uploadModeLocalLabel
                 }`}
           </div>
