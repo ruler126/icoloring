@@ -711,7 +711,7 @@ export function Studio() {
             onChange={(event) =>
               updateProviderSettings({ baseUrl: event.target.value })
             }
-            placeholder="留空则使用站内默认接口，也可填写你自己的 OpenAI 兼容地址"
+            placeholder="留空则使用网站默认AI接口地址"
             type="text"
             value={providerSettings.baseUrl ?? ""}
           />
@@ -726,7 +726,7 @@ export function Studio() {
               onChange={(event) =>
                 updateProviderSettings({ apiKey: event.target.value })
               }
-              placeholder="sk-..."
+              placeholder="填写你的 API Key"
               type="password"
               value={providerSettings.apiKey ?? ""}
             />
@@ -882,8 +882,8 @@ export function Studio() {
                       label: "自定义 AI",
                       description:
                         isTextImageMode
-                          ? "连接你的 OpenAI 兼容服务，生成质量更可控。"
-                          : "连接你的 AI 服务，生成更干净的黑白线稿。",
+                          ? "连接 AI 服务服务，生成质量更可控。"
+                          : "连接 AI 服务，生成更干净的黑白线稿。",
                     },
                   ] as Array<{
                     id: TextProviderMode;
