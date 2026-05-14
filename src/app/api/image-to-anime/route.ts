@@ -6,7 +6,7 @@ import {
   type CustomAiSettings,
 } from "@/lib/coloring";
 import { convertImageToAnime } from "@/lib/image-to-anime";
-import { addHistoryItem, saveGeneratedFile } from "@/lib/storage";
+import { addHistoryItemBestEffort, saveGeneratedFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     const fileName = `${id}.png`;
 
     await saveGeneratedFile(fileName, image);
-    await addHistoryItem({
+    await addHistoryItemBestEffort({
       id,
       mode: "anime",
       prompt,

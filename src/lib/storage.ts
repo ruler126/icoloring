@@ -37,11 +37,24 @@ class CosRequestError extends Error {
   }
 }
 
+class CosRequestTimeoutError extends Error {
+  constructor(
+    public readonly method: string,
+    public readonly key: string,
+    public readonly timeoutMs: number,
+  ) {
+    super(`COS ${method} ${key} timed out after ${timeoutMs}ms`);
+    this.name = "CosRequestTimeoutError";
+  }
+}
+
 const historyLimit = 18;
 const storageDir = path.join(process.cwd(), "storage");
 const generatedDir = path.join(storageDir, "generated");
 const historyFile = path.join(storageDir, "history.json");
 const cosHistoryKey = "history.json";
+const defaultCosTimeoutMs = 45_000;
+const historyCosTimeoutMs = 5_000;
 
 function getStorageDriver(): StorageDriver {
   return process.env.ICOLORING_STORAGE_DRIVER === "cos" ? "cos" : "local";
@@ -78,6 +91,19 @@ function getCosConfig() {
     secretId,
     secretKey,
   };
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getCosTimeoutMs(kind: "default" | "history" = "default") {
+  if (kind === "history") {
+    return readPositiveIntegerEnv("COS_HISTORY_TIMEOUT_MS", historyCosTimeoutMs);
+  }
+
+  return readPositiveIntegerEnv("COS_REQUEST_TIMEOUT_MS", defaultCosTimeoutMs);
 }
 
 function hmacSha1(key: string | Buffer, value: string) {
@@ -174,9 +200,17 @@ async function parseHistory(raw: string) {
   }
 }
 
-async function cosRequest(method: "GET" | "PUT", key: string, body?: Buffer) {
+async function cosRequest(
+  method: "GET" | "PUT",
+  key: string,
+  body?: Buffer,
+  options?: { timeoutMs?: number },
+) {
   const { endpoint } = getCosConfig();
   const url = new URL(encodeCosPath(key), endpoint);
+  const controller = new AbortController();
+  const timeoutMs = options?.timeoutMs ?? getCosTimeoutMs();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const signedHeaders: Record<string, string> = {
     host: url.host.toLowerCase(),
   };
@@ -189,11 +223,24 @@ async function cosRequest(method: "GET" | "PUT", key: string, body?: Buffer) {
   const headers = new Headers(signedHeaders);
   headers.set("Authorization", createCosAuthorization(method, key, signedHeaders));
 
-  const response = await fetch(url, {
-    body: body ? new Uint8Array(body) : undefined,
-    headers,
-    method,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      body: body ? new Uint8Array(body) : undefined,
+      headers,
+      method,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new CosRequestTimeoutError(method, key, timeoutMs);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -252,7 +299,9 @@ const cosProvider: StorageProvider = {
 
   async readHistory() {
     try {
-      const response = await cosRequest("GET", toCosKey(cosHistoryKey));
+      const response = await cosRequest("GET", toCosKey(cosHistoryKey), undefined, {
+        timeoutMs: getCosTimeoutMs("history"),
+      });
       return parseHistory(await response.text());
     } catch (error) {
       if (error instanceof CosRequestError && error.status === 404) {
@@ -275,6 +324,7 @@ const cosProvider: StorageProvider = {
       "PUT",
       toCosKey(cosHistoryKey),
       Buffer.from(JSON.stringify(next, null, 2)),
+      { timeoutMs: getCosTimeoutMs("history") },
     );
     return nextItem;
   },
@@ -298,4 +348,23 @@ export async function readHistory() {
 
 export async function addHistoryItem(item: Omit<HistoryItem, "id"> & { id?: string }) {
   return getProvider().addHistoryItem(item);
+}
+
+export async function addHistoryItemBestEffort(
+  item: Omit<HistoryItem, "id"> & { id?: string },
+) {
+  try {
+    return await addHistoryItem(item);
+  } catch (error) {
+    console.warn(
+      `[iColoring] history write skipped | ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return {
+      ...item,
+      id: item.id ?? randomUUID(),
+    };
+  }
 }

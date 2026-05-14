@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { generateTextColoringPage } from "@/lib/ai";
 import { getOutputSizeByQuality, type CustomAiSettings } from "@/lib/coloring";
-import { addHistoryItem, saveGeneratedFile } from "@/lib/storage";
+import { addHistoryItemBestEffort, saveGeneratedFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const fileName = `${id}.png`;
 
     await saveGeneratedFile(fileName, image);
-    await addHistoryItem({
+    await addHistoryItemBestEffort({
       id,
       mode: "text",
       prompt,

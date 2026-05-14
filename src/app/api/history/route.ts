@@ -1,10 +1,21 @@
-import { readHistory } from "@/lib/storage";
+import { readHistory, type HistoryItem } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const history = await readHistory();
+  let history: HistoryItem[];
+
+  try {
+    history = await readHistory();
+  } catch (error) {
+    console.warn(
+      `[iColoring] history read skipped | ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    history = [];
+  }
 
   return Response.json(
     history.map((item) => ({
