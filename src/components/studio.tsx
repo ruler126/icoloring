@@ -15,6 +15,8 @@ import {
   ecommerceDirectionPresets,
   ecommercePromptTemplates,
   type EcommerceDirection,
+  defaultCustomProviderBaseUrl,
+  defaultCustomProviderModel,
   getOutputSizeByQuality,
   getStyleLabel,
   historyLimit,
@@ -245,6 +247,8 @@ function sanitizeProviderSettings(value: unknown): CustomAiSettings {
   }
 
   const input = value as Record<string, unknown>;
+  const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl : "";
+  const model = typeof input.model === "string" ? input.model : "";
 
   return {
     providerMode: input.providerMode === "custom" ? "custom" : "free",
@@ -252,9 +256,12 @@ function sanitizeProviderSettings(value: unknown): CustomAiSettings {
       input.imageProviderMode === "custom" ? "custom" : "local",
     outputQuality:
       input.outputQuality === "ultra2048" ? "ultra2048" : "standard",
-    baseUrl: typeof input.baseUrl === "string" ? input.baseUrl : "",
+    baseUrl:
+      baseUrl.trim().replace(/\/+$/, "") === defaultCustomProviderBaseUrl
+        ? ""
+        : baseUrl,
     apiKey: typeof input.apiKey === "string" ? input.apiKey : "",
-    model: typeof input.model === "string" ? input.model : "",
+    model: model.trim() === defaultCustomProviderModel ? "" : model,
     allowFallback: Boolean(input.allowFallback),
   };
 }
@@ -278,10 +285,15 @@ function getProviderSettingsSnapshot() {
       return cachedProviderSnapshot;
     }
 
-    cachedProviderRaw = raw;
     cachedProviderSnapshot = raw
       ? sanitizeProviderSettings(JSON.parse(raw))
       : defaultProviderSettings;
+    cachedProviderRaw = JSON.stringify(cachedProviderSnapshot);
+
+    if (raw !== cachedProviderRaw) {
+      window.localStorage.setItem(providerStorageKey, cachedProviderRaw);
+    }
+
     return cachedProviderSnapshot;
   } catch {
     return defaultProviderSettings;
@@ -1100,6 +1112,12 @@ export function Studio() {
     setProviderNotice(null);
 
     try {
+      const testProviderSettings: CustomAiSettings = isRestoreMode
+        ? {
+            ...providerSettings,
+            imageProviderMode: "custom",
+          }
+        : providerSettings;
       const { response, data } = await fetchJsonWithTimeout<
         ProviderTestResponse | ApiErrorResponse
       >(
@@ -1108,7 +1126,7 @@ export function Studio() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            provider: providerSettings,
+            provider: testProviderSettings,
           }),
         },
         30_000,
