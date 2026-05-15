@@ -20,6 +20,7 @@ import {
   historyLimit,
   type ImageProviderMode,
   imageStylePresets,
+  restoreStylePresets,
   textStylePresets,
   type GeneratorMode,
   type TextProviderMode,
@@ -347,6 +348,8 @@ function sanitizeHistory(value: unknown): HistoryResponseItem[] {
           ? "image"
           : input.mode === "anime"
             ? "anime"
+          : input.mode === "restore"
+            ? "restore"
             : "text";
       return {
         id: typeof input.id === "string" ? input.id : createClientId(),
@@ -452,6 +455,7 @@ function useLocalHistory() {
   );
 }
 
+type UploadMode = "image" | "anime" | "restore";
 type LocalUploadMode = "image" | "anime";
 type LocalLineartStyle = "clean" | "cartoon" | "sketch";
 type LocalAnimeStyle = "cel" | "shoujo" | "shonen" | "chibi" | "fantasy" | "neon";
@@ -861,6 +865,7 @@ export function Studio() {
   const [selectedEcommerceTemplateId, setSelectedEcommerceTemplateId] = useState("");
   const [imageStyle, setImageStyle] = useState(imageStylePresets[0].id);
   const [animeStyle, setAnimeStyle] = useState(animeStylePresets[0].id);
+  const [restoreStyle, setRestoreStyle] = useState(restoreStylePresets[0].id);
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -880,24 +885,28 @@ export function Studio() {
           ? artStyle
           : mode === "anime"
             ? animeStyle
+          : mode === "restore"
+            ? restoreStyle
             : imageStyle,
-    [animeStyle, artStyle, imageStyle, mode, textStyle],
+    [animeStyle, artStyle, imageStyle, mode, restoreStyle, textStyle],
   );
   const uploadPreviewUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : ""),
     [file],
   );
   const imageProviderMode = providerSettings.imageProviderMode ?? "local";
-  const isUploadMode = mode === "image" || mode === "anime";
+  const isUploadMode =
+    mode === "image" || mode === "anime" || mode === "restore";
   const isTextPromptMode = mode === "text" || mode === "art";
   const isTextImageMode = mode === "art";
   const isEcommerceArtStyle = isTextImageMode && artStyle === "ecommerce";
   const isAnimeMode = mode === "anime";
+  const isRestoreMode = mode === "restore";
   const isLineartMode = mode === "image";
   const showCustomProviderConfig =
     isTextPromptMode
       ? providerSettings.providerMode === "custom"
-      : imageProviderMode === "custom";
+      : isRestoreMode || imageProviderMode === "custom";
   useEffect(() => {
     return () => {
       if (uploadPreviewUrl) {
@@ -965,21 +974,38 @@ export function Studio() {
         }
 
         setResult(null);
-        const uploadMode: LocalUploadMode = mode === "anime" ? "anime" : "image";
-        const uploadStyle = uploadMode === "anime" ? animeStyle : imageStyle;
-        const useCustomProvider = imageProviderMode === "custom";
+        const uploadMode: UploadMode =
+          mode === "anime" ? "anime" : mode === "restore" ? "restore" : "image";
+        const uploadStyle =
+          uploadMode === "anime"
+            ? animeStyle
+            : uploadMode === "restore"
+              ? restoreStyle
+              : imageStyle;
+        const effectiveProviderSettings: CustomAiSettings =
+          uploadMode === "restore"
+            ? {
+                ...providerSettings,
+                imageProviderMode: "custom",
+                allowFallback: false,
+              }
+            : providerSettings;
+        const useCustomProvider =
+          uploadMode === "restore" || imageProviderMode === "custom";
 
         if (!useCustomProvider) {
           const outputSize = getOutputSizeByQuality(providerSettings.outputQuality);
+          const localUploadMode: LocalUploadMode =
+            uploadMode === "anime" ? "anime" : "image";
           const processedBlob = await processUploadInBrowser(
             file,
-            uploadMode,
+            localUploadMode,
             uploadStyle,
             outputSize,
           );
           const saveFormData = new FormData();
           saveFormData.set("file", processedBlob, "generated.png");
-          saveFormData.set("mode", uploadMode);
+          saveFormData.set("mode", localUploadMode);
           saveFormData.set("prompt", file.name || "已上传图片");
           saveFormData.set("style", uploadStyle);
           saveFormData.set("width", String(outputSize));
@@ -1006,7 +1032,7 @@ export function Studio() {
           setResult(data);
           pushHistoryItem({
             id: data.id ?? createClientId(),
-            mode: uploadMode,
+            mode: localUploadMode,
             prompt: data.prompt,
             style: data.style,
             createdAt: new Date().toISOString(),
@@ -1019,12 +1045,16 @@ export function Studio() {
         const formData = new FormData();
         formData.set("file", file);
         formData.set("style", uploadStyle);
-        formData.set("provider", JSON.stringify(providerSettings));
+        formData.set("provider", JSON.stringify(effectiveProviderSettings));
 
         const { response, data } = await fetchJsonWithTimeout<
           GenerationResult | ApiErrorResponse
         >(
-          uploadMode === "anime" ? "/api/image-to-anime" : "/api/image-to-coloring",
+          uploadMode === "anime"
+            ? "/api/image-to-anime"
+            : uploadMode === "restore"
+              ? "/api/image-restore"
+              : "/api/image-to-coloring",
           {
             method: "POST",
             body: formData,
@@ -1104,12 +1134,26 @@ export function Studio() {
   }
 
   const uploadModeLocalLabel = isAnimeMode ? "快速动漫化" : "本地转线稿";
-  const uploadModeAiLabel = isAnimeMode ? "AI 转动漫" : "AI 转线稿";
-  const uploadModeStyleLabel = isAnimeMode ? "动漫风格" : "线稿风格";
-  const uploadModeResultLabel = isAnimeMode ? "动漫效果" : "线稿";
-  const uploadModeResultHint = isAnimeMode
-    ? "生成完成后会在这里显示动漫化结果。"
-    : "生成完成后会在这里显示线稿结果。";
+  const uploadModeAiLabel = isRestoreMode
+    ? "AI 老照片修复"
+    : isAnimeMode
+      ? "AI 转动漫"
+      : "AI 转线稿";
+  const uploadModeStyleLabel = isRestoreMode
+    ? "修复方式"
+    : isAnimeMode
+      ? "动漫风格"
+      : "线稿风格";
+  const uploadModeResultLabel = isRestoreMode
+    ? "修复效果"
+    : isAnimeMode
+      ? "动漫效果"
+      : "线稿";
+  const uploadModeResultHint = isRestoreMode
+    ? "修复完成后会在这里显示老照片修复结果。"
+    : isAnimeMode
+      ? "生成完成后会在这里显示动漫化结果。"
+      : "生成完成后会在这里显示线稿结果。";
   const customProviderTitle =
     mode === "art" && providerSettings.providerMode === "custom"
       ? "AI 文生图配置"
@@ -1117,6 +1161,8 @@ export function Studio() {
         ? "AI 转线稿配置"
         : mode === "anime" && imageProviderMode === "custom"
           ? "AI 转动漫配置"
+        : isRestoreMode
+          ? "AI 老照片修复配置"
           : "AI 涂色页配置";
   const customProviderFallbackLabel =
     mode === "art" && providerSettings.providerMode === "custom"
@@ -1206,19 +1252,21 @@ export function Studio() {
             地址或模型留空时使用默认预设。
           </span>
         </div>
-        <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700">
-          <input
-            checked={Boolean(providerSettings.allowFallback)}
-            className="mt-1"
-            onChange={(event) =>
-              updateProviderSettings({
-                allowFallback: event.target.checked,
-              })
-            }
-            type="checkbox"
-          />
-          <span>{customProviderFallbackLabel}</span>
-        </label>
+        {!isRestoreMode ? (
+          <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700">
+            <input
+              checked={Boolean(providerSettings.allowFallback)}
+              className="mt-1"
+              onChange={(event) =>
+                updateProviderSettings({
+                  allowFallback: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+            <span>{customProviderFallbackLabel}</span>
+          </label>
+        ) : null}
         {providerNotice ? (
           <div
             className={`rounded-2xl px-4 py-2.5 text-sm ${
@@ -1305,6 +1353,12 @@ export function Studio() {
             label="图片转动漫"
             name="generator-mode"
             onSelect={() => setMode("anime")}
+          />
+          <SegmentOption
+            checked={mode === "restore"}
+            label="老照片修复"
+            name="generator-mode"
+            onSelect={() => setMode("restore")}
           />
         </div>
 
@@ -1451,44 +1505,50 @@ export function Studio() {
             </>
           ) : (
             <>
-              <div>
-                <span className="mb-2 block text-sm font-semibold text-slate-700">
-                  转换方式
-                </span>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {([
-                    {
-                      id: "local",
-                      label: uploadModeLocalLabel,
-                      description: isAnimeMode
-                        ? "无需配置，快速把照片处理成动漫插画。"
-                        : "无需配置，适合普通照片快速提取轮廓。",
-                    },
-                    {
-                      id: "custom",
-                      label: uploadModeAiLabel,
-                      description: isAnimeMode
-                        ? "调用图片编辑/图生图AI模型获得更自然、更精致的动漫化结果。"
-                        : "调用图片编辑/图生图AI模型生成更干净的黑白线稿，效果更好。",
-                    },
-                  ] as Array<{
-                    id: ImageProviderMode;
-                    label: string;
-                    description: string;
-                  }>).map((item) => (
-                    <CardOption
-                      checked={imageProviderMode === item.id}
-                      description={item.description}
-                      key={item.id}
-                      label={item.label}
-                      name="image-provider-mode"
-                      onSelect={() =>
-                        updateProviderSettings({ imageProviderMode: item.id })
-                      }
-                    />
-                  ))}
+              {isRestoreMode ? (
+                <div className="rounded-2xl border border-sky-200 bg-sky-50/70 px-4 py-3 text-sm leading-6 text-sky-900">
+                  老照片修复仅使用自定义 AI 图片编辑模型，请填写支持图片编辑或图生图的接口配置。
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <span className="mb-2 block text-sm font-semibold text-slate-700">
+                    转换方式
+                  </span>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {([
+                      {
+                        id: "local",
+                        label: uploadModeLocalLabel,
+                        description: isAnimeMode
+                          ? "无需配置，快速把照片处理成动漫插画。"
+                          : "无需配置，适合普通照片快速提取轮廓。",
+                      },
+                      {
+                        id: "custom",
+                        label: uploadModeAiLabel,
+                        description: isAnimeMode
+                          ? "调用图片编辑/图生图AI模型获得更自然、更精致的动漫化结果。"
+                          : "调用图片编辑/图生图AI模型生成更干净的黑白线稿，效果更好。",
+                      },
+                    ] as Array<{
+                      id: ImageProviderMode;
+                      label: string;
+                      description: string;
+                    }>).map((item) => (
+                      <CardOption
+                        checked={imageProviderMode === item.id}
+                        description={item.description}
+                        key={item.id}
+                        label={item.label}
+                        name="image-provider-mode"
+                        onSelect={() =>
+                          updateProviderSettings({ imageProviderMode: item.id })
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {customProviderSettingsPanel}
 
@@ -1527,16 +1587,37 @@ export function Studio() {
                   {uploadModeStyleLabel}
                 </span>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  {(isAnimeMode ? animeStylePresets : imageStylePresets).map((item) => (
+                  {(isRestoreMode
+                    ? restoreStylePresets
+                    : isAnimeMode
+                      ? animeStylePresets
+                      : imageStylePresets
+                  ).map((item) => (
                     <CardOption
                       checked={activeStyle === item.id}
                       description={item.description}
                       key={item.id}
                       label={item.label}
-                      name={isAnimeMode ? "anime-style" : "image-style"}
-                      onSelect={() =>
-                        isAnimeMode ? setAnimeStyle(item.id) : setImageStyle(item.id)
+                      name={
+                        isRestoreMode
+                          ? "restore-style"
+                          : isAnimeMode
+                            ? "anime-style"
+                            : "image-style"
                       }
+                      onSelect={() => {
+                        if (isRestoreMode) {
+                          setRestoreStyle(item.id);
+                          return;
+                        }
+
+                        if (isAnimeMode) {
+                          setAnimeStyle(item.id);
+                          return;
+                        }
+
+                        setImageStyle(item.id);
+                      }}
                     />
                   ))}
                 </div>
@@ -1560,9 +1641,13 @@ export function Studio() {
                 ? "生成线稿中..."
                 : isAnimeMode
                   ? "动漫化处理中..."
+                : isRestoreMode
+                  ? "修复处理中..."
                   : "处理中..."
               : isUploadMode
-                ? "开始转换"
+                ? isRestoreMode
+                  ? "开始修复"
+                  : "开始转换"
                 : "开始生成"}
           </button>
           <div className="text-sm leading-6 text-slate-500">
@@ -1576,7 +1661,7 @@ export function Studio() {
                     : "自定义 AI · ai模型会中断它认为不健康的内容"
                 }`
               : ` · 来源：${
-                  imageProviderMode === "custom"
+                  isRestoreMode || imageProviderMode === "custom"
                     ? `${uploadModeAiLabel} · ai模型会中断它认为不健康的内容`
                     : uploadModeLocalLabel
                 }`}
@@ -1778,6 +1863,8 @@ export function Studio() {
                             ? "文生图"
                           : item.mode === "anime"
                             ? "图片转动漫"
+                          : item.mode === "restore"
+                            ? "老照片修复"
                             : "图片转线稿"}
                       </span>
                       <span>{getStyleLabel(item.mode, item.style)}</span>

@@ -4,6 +4,7 @@ import {
   defaultCustomProviderModel,
   buildImageAnimePrompt,
   buildImageLineartPrompt,
+  buildImageRestorePrompt,
   buildTextImagePrompt,
   type CustomAiSettings,
   type EcommerceDirection,
@@ -1408,6 +1409,23 @@ export async function generateImageAnimeWithCustomProvider(
     buildImageAnimePrompt,
     "AI 图片转动漫失败",
     "请先切换到 AI 转动漫模式。",
+  );
+}
+
+export async function generateImageRestoreWithCustomProvider(
+  imageBuffer: Buffer,
+  mimeType: string,
+  style: string,
+  settings?: CustomAiSettings,
+) {
+  return generateEditedImageWithCustomProvider(
+    imageBuffer,
+    mimeType,
+    style,
+    settings,
+    buildImageRestorePrompt,
+    "AI 老照片修复失败",
+    "请先切换到自定义 AI 修复模式。",
   );
 }
 

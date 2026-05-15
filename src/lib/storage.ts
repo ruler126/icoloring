@@ -2,7 +2,7 @@ import { createHmac, createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-export type HistoryMode = "text" | "art" | "image" | "anime";
+export type HistoryMode = "text" | "art" | "image" | "anime" | "restore";
 
 export type HistoryItem = {
   id: string;

@@ -1,4 +1,4 @@
-export type GeneratorMode = "text" | "art" | "image" | "anime";
+export type GeneratorMode = "text" | "art" | "image" | "anime" | "restore";
 export type TextProviderMode = "free" | "custom";
 export type ImageProviderMode = "local" | "custom";
 export type OutputQuality = "standard" | "hd1080" | "ultra2048";
@@ -139,6 +139,37 @@ export const animeStylePresets: StylePreset[] = [
     label: "霓虹都市",
     description: "高对比霓虹色调，适合夜景、人像和街头照片。",
     promptHint: "neon cyber anime, vivid lighting, cinematic urban style",
+  },
+];
+
+export const restoreStylePresets: StylePreset[] = [
+  {
+    id: "archive",
+    label: "档案级修复",
+    description: "保留原貌、年代感和胶片质感，适合大多数老照片。",
+    promptHint:
+      "museum archive quality restoration, faithful original look, subtle film grain, natural clarity",
+  },
+  {
+    id: "portrait",
+    label: "人像保真",
+    description: "重点保护五官、年龄感和真实皮肤纹理，避免 AI 脸。",
+    promptHint:
+      "portrait identity preservation, realistic facial anatomy, natural eyes, preserve age characteristics",
+  },
+  {
+    id: "colorize",
+    label: "黑白上色",
+    description: "在修复基础上进行历史真实感上色，色彩低饱和自然。",
+    promptHint:
+      "historically accurate colorization, natural skin tones, realistic fabric colors, muted vintage palette",
+  },
+  {
+    id: "damage",
+    label: "重度破损",
+    description: "针对划痕、折痕、霉斑、水渍和缺损区域做深度修复。",
+    promptHint:
+      "reconstruct missing photo regions naturally, repair tears, folds, water damage, mold stains and cracks",
   },
 ];
 
@@ -315,6 +346,8 @@ export function getStyleLabel(mode: GeneratorMode, styleId: string) {
         ? artStylePresets
       : mode === "anime"
         ? animeStylePresets
+      : mode === "restore"
+        ? restoreStylePresets
         : imageStylePresets;
   return presets.find((item) => item.id === styleId)?.label ?? styleId;
 }
@@ -436,5 +469,30 @@ export function buildImageAnimePrompt(styleId: string) {
     "avoid opening closed eyes",
     "avoid altering hand pose or instrument shape",
     style.promptHint,
+  ].join(", ");
+}
+
+export function buildImageRestorePrompt(styleId: string) {
+  const style =
+    restoreStylePresets.find((item) => item.id === styleId) ??
+    restoreStylePresets[0];
+
+  return [
+    "Professional archival photo restoration",
+    "preserve original identity and facial features",
+    "realistic skin texture",
+    "repair scratches, dust, stains, folds, cracks and damaged areas",
+    "recover fine details naturally",
+    "balanced exposure and contrast",
+    "authentic historical appearance",
+    "preserve original hairstyle and clothing",
+    "maintain era characteristics",
+    "film grain preservation",
+    "non-destructive restoration",
+    "documentary photography realism",
+    "photographic realism",
+    "realistic eyes and hands",
+    style.promptHint,
+    "Avoid anime, cartoon, painting, illustration, CGI, AI face, beauty filter, plastic skin, oversaturated colors, modern appearance, fake smile, distorted anatomy, blurry, low quality, over-sharpening",
   ].join(", ");
 }
